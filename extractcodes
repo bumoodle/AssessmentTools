@@ -1,0 +1,21 @@
+#!/bin/bash
+
+FILTER="-threshold 50%"
+FILTER_PROG="convert"
+
+#for each of the command-line arguments
+for i
+do
+    #create a temporary file, which will store the filter's output
+    outfile=$(mktemp)
+
+    #apply the filter
+    $FILTER_PROG "$i" $FILTER "$outfile"
+    
+    #search the file for codes
+    zbarimg -q --raw $outfile
+
+    #remove the temporary file
+    rm $outfile
+
+done
