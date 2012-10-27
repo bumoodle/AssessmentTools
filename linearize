@@ -171,7 +171,7 @@ class Page:
         """
 
         #use zbar to read the barcode data
-        barcodes = Popen('./extractcodes "' + filename + '"', stdout=PIPE, shell=True).stdout.read()
+        barcodes = Popen('zbarimg -q --raw "' + filename + '"', stdout=PIPE, shell=True).stdout.read()
 
         #and return the identified barcodes.
         return barcodes.split("\n")

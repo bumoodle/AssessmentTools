@@ -10,7 +10,8 @@ do
     outfile=$(mktemp)
 
     #apply the filter
-    $FILTER_PROG "$i" $FILTER "$outfile"
+    #$FILTER_PROG "$i" $FILTER "$outfile"
+    cp $i $outfile
     
     #search the file for codes
     zbarimg -q --raw $outfile
