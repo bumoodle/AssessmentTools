@@ -1,0 +1,146 @@
+#!/usr/bin/env ruby
+
+require 'zbar'
+require 'RMagick'
+
+# Extend the ZBar module to include better handling of Color images.
+
+module ZBar
+  class Image
+
+    # Creates a ZBar Image from a JPEG image; enhanced for recognizing Black-and-White
+    # barcodes in color JPEG images. 
+    #
+    # @param [String, File] image The image file to be wrapped with a ZBar Image object.
+    # @param [Float] image The "darkness" threshold a pixel must meet to be considered black. Pixels which 
+    #                      do not meed this threshold are considered white.
+    # 
+    # @return [Image] The ZBar Image object that wraps the given image.
+    #
+    def self.from_color_jpeg(image, threshold=0.65)
+   
+        #if we were passed readable object (e.g. a file)
+        #read its contents before continuing
+        if image.respond_to?(:read)
+            image = image.read
+        end
+
+        #convert the image into an ImageMagick object
+        image = Magick::Image::from_blob(image).first
+
+        #convert the image into black-and-white using a mid-range threshold
+        image = image.threshold(Magick::QuantumRange * threshold)
+
+        #and remove the ImageMagick wrapper
+        image = image.to_blob
+        
+        #wrap the converted
+        self.from_jpeg(image)
+    end
+  
+  end
+end
+
+#Represents a paper version of a Moodle quesion attempt.
+class QuestionAttempt
+
+  #Regular expression used to parse Question Identifier codes
+  QUESTION_ID = /([0-9]+)\|([0-9]+)\|([0-9]+)/
+
+  #Regular expression usd to parse Grade Disqualifier codes
+  GRADE_DISQUALIFIER = /GRADE([0-9]+)/
+
+  # Initializes a new Question Attempt object.
+  #
+  def initialize(usage_id, quiz_id, attempt_id, images, grade = 0)
+    
+    #import values from the constructor
+    @usage_id = usage_id
+    @quiz_id = quiz_id
+    @attempt_id = attempt_id
+    @images = images
+    @grade = grade
+
+  end
+
+  # Returns the proper Moodle-uploadable filename for then given Question Attempt.
+  #
+  #
+  def filename_for_upload
+     "U#{@usage_id}_Q#{@quiz_id}_A#{@attempt_id}_G#{@grade}"
+  end
+
+  # Creates a new QuestionAttempt object from a set of images.
+  #
+  # @param [Array, string] A filename, or list of filenames, which contain images to be parsed as question attempts.
+  #
+  def self.from_images(images, threshold=0.65)
+   
+    #initialize the QA's identifiers to nil
+    usage_id, quiz_id, attempt_id = nil, nil, nil
+
+    #and create a list of possible grades
+    possible_grades = *(1..10)
+
+    #If we haven't been provided a collection of images, wrap the image in an Array
+    images = *[images] unless images.respond_to?(:each)
+
+    #process each image in our array
+    images.each do |raw_image|
+
+      #ZBar::Image.from_jpeg(File.read(image)).process
+      image = ZBar::Image.from_color_jpeg(File.read(raw_image), threshold)
+
+      #extract the barcodes from the image
+      barcodes = image.process
+
+      #process each of the extracted barcodes
+      barcodes.each do |code|
+      
+        #attempt to match the barcode against our Question ID pattern
+        data = code.data.match(QUESTION_ID)
+        
+        #if it matches the identifier pattern
+        if data
+
+          #use it to determine the QA's identifiers
+          usage_id, quiz_id, attempt_id = data[1], data[2], data[3]
+          
+        end
+
+        #attempt ot match the barcode against our grade disqualifier pattern
+        data = code.data.match(GRADE_DISQUALIFIER)
+
+        #if the data matches the disqualifier pattern
+        if data
+ 
+          #get the value of the grade that was disqualified
+          grade = Integer(data[1])
+
+          #and remove the disqualified grade from the array of possible grades
+          possible_grades.delete(grade)
+
+        end
+      end
+
+      #if we were able to find a grade, then use it; otherwise, set a grade of nil
+      grade = (possible_grades.count == 1) ? possible_grades[0] : nil
+
+      unless possible_grades.count == 1
+        p possible_grades
+      end
+
+      #Create a new QuestionAttempt object from the parsed data 
+      return self.new(usage_id, quiz_id, attempt_id, images, grade) 
+
+    end
+  end
+end
+
+
+
+
+#for each of the provided image files
+ARGV.each do |image|
+  p QuestionAttempt.from_images(image).filename_for_upload
+end
