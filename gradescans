@@ -2,9 +2,10 @@
 
 require 'zbar'
 require 'RMagick'
+require 'highline/import'
+
 
 # Extend the ZBar module to include better handling of Color images.
-
 module ZBar
   class Image
 
@@ -41,6 +42,25 @@ module ZBar
   end
 end
 
+# TODO: Replace with real TermView module
+#
+# Temporary stand-in for a TermView module, which re-implements the perl application 'tiv' 
+# in Ruby.
+module TermView
+ 
+  # Prints the given image such that it can be interpreted on the command line.
+  def self.show_image(image, start=1010)
+
+    #get the directory in which this script file resides
+    local_dir = File::expand_path(File::dirname(__FILE__))
+
+    #and call the termview stand-in from the same directory
+    system("\"#{local_dir}/termview\" -s #{start} \"#{image}\"")
+
+  end
+
+end
+
 #Represents a paper version of a Moodle quesion attempt.
 class QuestionAttempt
 
@@ -50,13 +70,20 @@ class QuestionAttempt
   #Regular expression usd to parse Grade Disqualifier codes
   GRADE_DISQUALIFIER = /GRADE([0-9]+)/
 
+  #allow the grade to be read/written externally
+  attr_accessor :grade
+
+  #allow the identifiers to be read/written externally
+  attr_accessor :usage_id
+  attr_accessor :question_id
+  attr_accessor :attempt_id
+
   # Initializes a new Question Attempt object.
-  #
-  def initialize(usage_id, quiz_id, attempt_id, images, grade = 0)
+  def initialize(usage_id, question_id, attempt_id, images, grade = 0)
     
     #import values from the constructor
     @usage_id = usage_id
-    @quiz_id = quiz_id
+    @question_id = question_id
     @attempt_id = attempt_id
     @images = images
     @grade = grade
@@ -65,9 +92,32 @@ class QuestionAttempt
 
   # Returns the proper Moodle-uploadable filename for then given Question Attempt.
   #
-  #
-  def filename_for_upload
-     "U#{@usage_id}_Q#{@quiz_id}_A#{@attempt_id}_G#{@grade}"
+  # @param [Integer] page The page number to be appended to the filename.
+  # @param [String] extension The extension to be appended to the filename, including the leading dot, or nil to use the same filetype as the original image.
+  def filename_for_upload(page=0, extension=nil, directory=nil)
+    
+    #get the original filename used to represent the QA
+    original_filename = @images[page] 
+
+    #if the extension has not already been set, use the extension from the original filename
+    extension ||= File::extname(original_filename)
+
+    #if the directory has not already been set, use the same directory as the original file
+    directory ||= File::dirname(original_filename)
+
+    #return the new filename
+    "#{directory}/U#{@usage_id}_Q#{@question_id}_A#{@attempt_id}_G#{@grade}_P#{page}#{extension}"
+  end
+
+  def rename_for_upload!(extension=nil)
+
+    #rename each of the images in the Question Attempt
+    @images.each_with_index { |image, i| File::rename(image, filename_for_upload(i)) }
+
+  end
+
+  def missing_identifiers?
+    @usage_id.nil? or @question_id.nil? or @attempt_id.nil?
   end
 
   # Creates a new QuestionAttempt object from a set of images.
@@ -77,7 +127,7 @@ class QuestionAttempt
   def self.from_images(images, threshold=0.65)
    
     #initialize the QA's identifiers to nil
-    usage_id, quiz_id, attempt_id = nil, nil, nil
+    usage_id, question_id, attempt_id = nil, nil, nil
 
     #and create a list of possible grades
     possible_grades = *(1..10)
@@ -104,7 +154,7 @@ class QuestionAttempt
         if data
 
           #use it to determine the QA's identifiers
-          usage_id, quiz_id, attempt_id = data[1], data[2], data[3]
+          usage_id, question_id, attempt_id = data[1], data[2], data[3]
           
         end
 
@@ -126,21 +176,75 @@ class QuestionAttempt
       #if we were able to find a grade, then use it; otherwise, set a grade of nil
       grade = (possible_grades.count == 1) ? possible_grades[0] : nil
 
-      unless possible_grades.count == 1
-        p possible_grades
-      end
-
       #Create a new QuestionAttempt object from the parsed data 
-      return self.new(usage_id, quiz_id, attempt_id, images, grade) 
+      return self.new(usage_id, question_id, attempt_id, images, grade) 
 
     end
   end
 end
 
+def interactive_mass_rename!
 
+  #inform the user that we're about to start
+  print "Grading and renaming #{ARGV.count} files.\n"
 
+  #store a list of grades encountered so far
+  grades = []
 
-#for each of the provided image files
-ARGV.each do |image|
-  p QuestionAttempt.from_images(image).filename_for_upload
+  #for each of the provided image files
+  ARGV.each do |image|
+
+    #parse the image into a Question Attempt
+    qa = QuestionAttempt.from_images(image)
+
+    #if the question's grade is nil
+    if qa.grade.nil?
+
+      print "\n"
+      STDOUT.flush
+
+      #display the grading information for the image on the command line
+      TermView::show_image(image)
+
+      #get a grade from the user between 0 and 10
+      qa.grade = ask("\nCouldn't find a grade in the image above ('#{image}'). Enter an integer grade between 0 and 10> ", Integer) { |i| i.in = 0..10 }
+
+    end
+
+    #if the question is missing identifiers, prompt for them on the command line
+    if qa.missing_identifiers?
+
+      #establish the format in which the user should enter the identifier 
+      identifier_format = /^([0-9]+)-([0-9]+)-([0-9]+)$/
+
+      p qa
+
+      #prompt the user for the question's identifier
+      identifier = ask ("\nCouldn't figure out the Attempt ID for '#{image}'. Enter the attempt ID displayed below the question barcode> ")  { |i| i.validate = identifier_format }
+
+      #once we have a valid identifier, parse it, and extract the user's information
+      identifier = identifier.match(identifier_format)
+      
+      #and use it to fill in the missing fields from the QA
+      qa.usage_id, qa.question_id, qa.attempt_id = identifier[1], identifier[2], identifier[3]
+
+    end
+
+    #rename the file, applying a format accepted by Moodle
+    qa.rename_for_upload!
+
+    #add the question's grade to the local array of grades
+    grades << qa.grade
+
+    #compute a quick average of the grades encountered
+    average = (grades.inject(0.0) { | sum, element | sum + element }) / grades.count
+
+    #and print a quick status update.
+    print "Renamed #{grades.count} files. Average grade #{average.round(2)}.               \r"
+    STDOUT.flush
+
+  end
 end
+
+#TODO: accept modes other than rename
+interactive_mass_rename!
