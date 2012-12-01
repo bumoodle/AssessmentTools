@@ -137,7 +137,7 @@ module Assessment
     # Creates a single PDF for each student copy of the assessment,
     # in roughly the same format that the student took it, but unordered.
     #
-    def to_pdfs_by_copy(path_prefix="", name="assessment")
+    def to_pdfs_by_copy(path_prefix="", name="assessment", footer)
 
       #Iterate over the copies of this assessment
       each_copy do |id, attempts|
@@ -147,7 +147,7 @@ module Assessment
         filename = path_prefix + (block_given? ? (yield id) : "#{name}_#{id}.pdf")
 
         #Create a PDF from the given collection of attempts.
-        self.class.pdf_from_attempt_collection(filename, attempts)
+        self.class.pdf_from_attempt_collection(filename, attempts, footer)
 
       end    
     end
@@ -156,7 +156,7 @@ module Assessment
     # Creates a single PDF for each encountered question variant which contains
     # all attempts at that variant.
     #
-    def to_pdfs_by_question(path_prefix="", name="question")
+    def to_pdfs_by_question(path_prefix="", name="question", footer=nil)
 
       #Iterate over the copies of this assessment
       each_question do |id, attempts|
@@ -166,7 +166,7 @@ module Assessment
         filename = path_prefix + (block_given? ? (yield id) : "#{name}_#{id}.pdf")
 
         #Create a PDF from the given collection of attempts.
-        self.class.pdf_from_attempt_collection(filename, attempts)
+        self.class.pdf_from_attempt_collection(filename, attempts, footer)
 
       end
 
@@ -175,13 +175,13 @@ module Assessment
     #
     # Create a single PDF which contains all of the 
     #
-    def to_pdf_by_question(filename)
+    def to_pdf_by_question(filename, footer=nil)
 
       #Retrieve a list of all valid attempts
       attempts = valid_attempts.sort_by! { |x| x.question_id }
 
       #And convert the list of attempts to a single PDF.
-      self.class.pdf_from_attempt_collection(filename, attempts)
+      self.class.pdf_from_attempt_collection(filename, attempts, footer)
 
     end
 
@@ -202,7 +202,7 @@ module Assessment
     #
     # Creates a single PDF file from an ordered collection of attempts.
     #
-    def self.pdf_from_attempt_collection(filename, attempts)
+    def self.pdf_from_attempt_collection(filename, attempts, footer=nil)
 
       #Generate a PDF which contains each of the requested images, in order.
       Prawn::Document.generate(filename, :skip_page_creation => true) do
@@ -212,12 +212,30 @@ module Assessment
           #Convert the given attempt to a JPEG image.
           attempt_image = attempt.to_jpeg
 
-          #Start a new page which is exactly sized to the image.
-          start_new_page(:size => [attempt_image.columns, attempt_image.rows], :margin => 0)
+          #And extract the image size, which we'll use to size our page.
+          size = attempt_image.columns, attempt_image.rows
 
-          #Convert the image to 
+          #If we have a footer image...
+          unless footer.nil?
+            footer_image = Magick::Image.read(footer).first
+
+            #Adjust for its size by adding the footer height...
+            size[1] += footer_image.rows 
+
+            #And ensure that the page is wide enough for it
+            size[0] = [footer_image.columns, attempt_image.columns].max 
+
+          end
+
+          #Start a new page which is exactly sized to the image.
+          start_new_page(:size => size, :margin => 0)
+          
+          #Add the image to our PDF...
           raw_image = StringIO.new(attempt_image.to_blob)
           image(raw_image)
+
+          #If we have a footer, add it.
+          image(footer) unless footer.nil?
 
         end
       end

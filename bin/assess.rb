@@ -14,4 +14,5 @@ end
 #Create a new assessment, and fill it with each of the given files
 assess = Assessment::Assessment.from_files(ARGV)
 
-assess.to_pdf_by_question('/tmp/pdfs.pdf')
+assess.to_pdf_by_question('/tmp/pdfs.pdf', '/tmp/footer.png')
+#assess.to_pdf_by_question('/tmp/pdfs.pdf', nil)

@@ -125,7 +125,7 @@ module Assessment
     #
     # Converts the given attempt to a single, JPEG image.
     #
-    def to_jpeg(footer=nil)
+    def to_jpeg(footer=nil, density=300, quality=85)
     
       #Create a new collection of ImageMagick images...
       image_list = Magick::ImageList.new
@@ -133,7 +133,7 @@ module Assessment
       @images.each do |image_info|
        
         #Load each of the images into memory...
-        image = Magick::Image.read(image_info[:path]) {self.density = 300; self.quality = 85 }
+        image = Magick::Image.read(image_info[:path]) {self.density = density; self.quality = quality }
         image = image.first
 
         #... rotate the given image, so it's upright...
