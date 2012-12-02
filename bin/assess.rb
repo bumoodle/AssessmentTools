@@ -2,6 +2,7 @@
 require 'trollop'
 require 'docsplit'
 require 'assessment'
+require 'progressbar'
 
 #
 # Splits a PDF and returns an array of relevant images.
@@ -79,33 +80,70 @@ split_pdfs!(ARGV, opts[:density]) if opts[:split]
 #If we don't have any other operation, abort.
 exit unless opts[:question] || opts[:attempt]
 
+#
+# Analysis: Analyze each of the provided files, and extract grading information.
+# 
+
+#Create a new progress bar, which will track the analysis.
+progress = ProgressBar.new('Analyzing', ARGV.count - 1,)
+
 #Create a new assessment, and fill it with each of the given files
-assess = Assessment::Assessment.from_files(ARGV) do |progress, total| 
-  report_progress("Sorting through the provided assessments", progress, total)
-end
+assess = Assessment::Assessment.from_files(ARGV) { |p| progress.set(p) }
+
+#Finish filling the progress bar.
+progress.finish
+
+
+#
+# Handle generation of the files.
+# TODO: abstract the below to a single with_progress method
+#
+
 
 #Determine the output path
 path = opts[:outpath] + '/'
 
+options = {
+  :path => path, 
+  :footer => opts[:footer], 
+  :scale => opts[:scale], 
+  :density => opts[:dpi]
+}
+
+#Compute the total number of attempts-images to be generated,
+#which should roughly correspond to the needed computation time.
+to_be_generated = (opts[:question] ? assess.question_count : 0)
+to_be_generated += (opts[:attempt] ? assess.copy_count : 0)
+
+
+#Create a progress bar, which will track the status of the generation.
+progress = ProgressBar.new('Generating', to_be_generated)
+
+
 #Handle the question option...
 if opts[:question]
 
-  options = { :path => path, :prefix => opts[:qprefix], :footer => opts[:footer], :scale => opts[:scale], :density => opts[:dpi] }
+  #Set the file prefix to the question-specific prefix.
+  options[:prefix] = opts[:qprefix]
 
-  assess.to_pdfs_by_question(options) do |progress, total| 
-    report_progress("Generating single-question PDFs", progress, total) 
-  end
+  #Generate the question PDFs, updating the progress bar as we go.
+  assess.to_pdfs_by_question(options) { progress.inc }
 
 end
 
 #Handle the question option...
 if opts[:attempt]
   
-  options = { :path => path, :prefix => opts[:aprefix], :footer => opts[:footer], :scale => opts[:scale], :density => opts[:dpi] }
+  #Set the file prefix to the question-specific prefix.
+  options[:prefix] = opts[:aprefix]
 
-  assess.to_pdfs_by_copy(options) do |progress, total| 
-    report_progress("Generating single-attempt PDFs", progress, total) 
-  end
+  #Generate the question PDFs, updating the progress bar as we go.
+  assess.to_pdfs_by_question(options) { progress.inc }
 
 end
+
+#And terminate the progress bar once we're complete.
+progress.finish
+
+
 

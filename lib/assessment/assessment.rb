@@ -105,16 +105,14 @@ module Assessment
 
     end
 
-    def maximum_dimensions
-
-      #Get the maximum width and height for any given attempt.
-      width = @attempts.map { |a| a.maximum_dimensions[0] }.max
-      height = @attempts.map { |a| a.maximum_dimensions[1] }.max
-
-      #And return them.
-      return width, height 
-
+    #
+    # Returns the number of unique student copies 
+    # included in this assessment.
+    #
+    def copy_count
+      @by_copy.count
     end
+    
 
     #
     # Iterates over the question attempts in the assessment.
@@ -139,6 +137,22 @@ module Assessment
     def each_question(&block)
       @by_question.each(&block)
     end
+
+    #
+    # Returns an array of all of the _invalid_ question attempts in this assessment.
+    # 
+    def invalid_attempts
+      @attempts.select { |x| x.missing_identifiers? }
+    end
+
+
+    #
+    # Returns the amount of unique question variants in the assessment.
+    #
+    def question_count 
+      @by_question.count
+    end
+
 
     #
     # Creates a single PDF for each student copy of the assessment,
@@ -176,7 +190,7 @@ module Assessment
 
         #If the caller passed a block, use it to figure out the filename;
         #otherwise, use the defult name and path prefix.
-        filename = path + (block_given? ? (yield id) : "#{prefix}_#{id}.pdf")
+        filename = path +  "#{prefix}_#{id}.pdf"
 
         #Create a PDF from the given collection of attempts.
         self.class.pdf_from_attempt_collection(filename, attempts, footer, scale, density)
@@ -217,19 +231,6 @@ module Assessment
       @attempts.reject { |x| x.missing_identifiers? }
     end
 
-    #
-    # Returns an array of all of the _invalid_ question attempts in this assessment.
-    # 
-    def invalid_attempts
-      @attempts.select { |x| x.missing_identifiers? }
-    end
-
-    #
-    # Returns true iff the given image file is considered "large".
-    #
-    def self.image_is_large?(filename)
-      File::size(filename) > LARGE_FILE_CUTOFF
-    end
 
     #
     # Creates a single PDF file from an ordered collection of attempts.

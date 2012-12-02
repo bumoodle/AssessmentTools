@@ -128,10 +128,14 @@ module Assessment
       image_list = Magick::ImageList.new
       
       @images.each do |image_info|
-       
-       #Load each of the images into memory...
-        image = Magick::Image.read(image_info[:path]) {self.density = density; self.quality = quality }
-        image = image.first
+      
+        image = nil
+
+        #Load each of the images into memory...
+        self.class.quietly do
+          image = Magick::Image.read(image_info[:path]) {self.density = density; self.quality = quality }
+          image = image.first
+        end
 
         #... rotate the given image, so it's upright...
         image.rotate!(image_info[:rotation])
