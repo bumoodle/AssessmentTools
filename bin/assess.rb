@@ -45,19 +45,29 @@ def split_pdfs!(list, density=300, format=:jpg)
 
 end
 
+def report_progress(message, progress, total)
+    #Print a status message to the console...
+    percent = (progress * 100) / total
+    print "\r#{message}... [#{progress}/#{total}, #{percent}%]            "
+end
+
 
 # Set up the command-line arguments for the application.
 opts = Trollop::options do
   version "PaperCopy assessment helper for Moodle, version 0.1.0"
   
   opt :split,     "Split multi-page PDFs into multiple single-page PDFs."
-  opt :outpath,   "Specifies the output folder for multiple-file operations.", :default => Dir::pwd + '/'
+  opt :outpath,   "Specifies the output folder for multiple-file operations.", :default => Dir::pwd
+
   
   opt :question,  "Split into several single-question PDFs."
   opt :qprefix,   "The prefix use for single-question PDF files. Ignored unless the --question flag is provided.", :default => 'question'
 
   opt :attempt,   "Split into several single-attempt PDFs."
   opt :aprefix,   "The prefix use for single-attempt PDF files. Ignored unless the --attempt flag is provided.", :default => 'attempt'
+
+  opt :dpi,       "The DPI at which any PDF input should be captured.", :default => 300
+  opt :scale,     "The size scale by which the input PDFs' dimensions are multiplied. 1 indicates same size; 0.25 indicates quarter size.", :default => 1.0
 
   opt :footer,    "An image to be appended to each question in the PDF.", :default => nil, :type=> :string
 
@@ -70,15 +80,32 @@ split_pdfs!(ARGV, opts[:density]) if opts[:split]
 exit unless opts[:question] || opts[:attempt]
 
 #Create a new assessment, and fill it with each of the given files
-assess = Assessment::Assessment.from_files(ARGV)
+assess = Assessment::Assessment.from_files(ARGV) do |progress, total| 
+  report_progress("Sorting through the provided assessments", progress, total)
+end
+
+#Determine the output path
+path = opts[:outpath] + '/'
 
 #Handle the question option...
 if opts[:question]
-  assess.to_pdfs_by_question(opts[:outpath], opts[:qprefix], opts[:footer])
+
+  options = { :path => path, :prefix => opts[:qprefix], :footer => opts[:footer], :scale => opts[:scale], :density => opts[:dpi] }
+
+  assess.to_pdfs_by_question(options) do |progress, total| 
+    report_progress("Generating single-question PDFs", progress, total) 
+  end
+
 end
 
 #Handle the question option...
 if opts[:attempt]
-  assess.to_pdfs_by_attempt(opts[:outpath], opts[:aprefix], opts[:footer])
+  
+  options = { :path => path, :prefix => opts[:aprefix], :footer => opts[:footer], :scale => opts[:scale], :density => opts[:dpi] }
+
+  assess.to_pdfs_by_copy(options) do |progress, total| 
+    report_progress("Generating single-attempt PDFs", progress, total) 
+  end
+
 end
 

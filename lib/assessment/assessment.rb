@@ -34,13 +34,16 @@ module Assessment
     #
     # Factory method which procudes a new Assessment from a collection of files.
     #
+    # If a block is provided, the block will be notified of progress, in the form of
+    # |last_index_processed, total|.
+    #
     def self.from_files(files)
 
       #Create a new, empty assessment.
       assessment = self.new
 
       #And add each file in the 
-      files.each do |file|
+      files.each_with_index do |file, index|
 
         #Handle each file according to its extension
         case File.extname(file)
@@ -49,6 +52,10 @@ module Assessment
           else 
             assessment.add_image(file)
           end
+
+        #If we were given a block, notify it of our progress.
+        yield index, files.count if block_given? 
+
       end
 
       assessment
@@ -133,22 +140,51 @@ module Assessment
       @by_question.each(&block)
     end
 
-
     #
     # Creates a single PDF for each student copy of the assessment,
     # in roughly the same format that the student took it, but unordered.
     #
-    def to_pdfs_by_copy(path_prefix="", name="assessment", footer)
+    # Options are the same as the to_pdfs function.
+    #
+    def to_pdfs_by_copy(options = {}, &block)
+      to_pdfs(each_copy, options, &block)
+    end
+
+    
+    #
+    # Creates a collection of PDFs by iterating over a hash or hash-like object.
+    # 
+    # The provided iterator should yield:
+    # - an id (which is used to determine the appropriate output filename)
+    # - a enumerable collection of attempts to be included in the PDF
+    #
+    # 
+    #
+    def to_pdfs(iterator, options={})
+
+      #Defaults for the "keyword arguments".
+      path        = options[:path]     || ""
+      prefix      = options[:prefix]   || "attempt"
+      scale       = options[:scale]    || 1.0
+      density     = options[:density]  || 300
+      footer      = options[:footer]
 
       #Iterate over the copies of this assessment
-      each_copy do |id, attempts|
+      iterator.each_with_index do |values, index|
+
+        id, attempts = values 
 
         #If the caller passed a block, use it to figure out the filename;
         #otherwise, use the defult name and path prefix.
-        filename = path_prefix + (block_given? ? (yield id) : "#{name}_#{id}.pdf")
+        filename = path + (block_given? ? (yield id) : "#{prefix}_#{id}.pdf")
 
         #Create a PDF from the given collection of attempts.
-        self.class.pdf_from_attempt_collection(filename, attempts, footer)
+        self.class.pdf_from_attempt_collection(filename, attempts, footer, scale, density)
+
+        #If a status-requesting block was given, yield the current status to it.
+        if block_given?
+            yield index, iterator.count
+        end
 
       end    
     end
@@ -157,20 +193,8 @@ module Assessment
     # Creates a single PDF for each encountered question variant which contains
     # all attempts at that variant.
     #
-    def to_pdfs_by_question(path_prefix="", name="question", footer=nil)
-
-      #Iterate over the copies of this assessment
-      each_question do |id, attempts|
-
-        #If the caller passed a block, use it to figure out the filename;
-        #otherwise, use the defult name and path prefix.
-        filename = path_prefix + (block_given? ? (yield id) : "#{name}_#{id}.pdf")
-
-        #Create a PDF from the given collection of attempts.
-        self.class.pdf_from_attempt_collection(filename, attempts, footer)
-
-      end
-
+    def to_pdfs_by_question(options={}, &block)
+      to_pdfs(each_question, options, &block)
     end
 
     #
@@ -210,7 +234,7 @@ module Assessment
     #
     # Creates a single PDF file from an ordered collection of attempts.
     #
-    def self.pdf_from_attempt_collection(filename, attempts, footer=nil)
+    def self.pdf_from_attempt_collection(filename, attempts, footer=nil, scale=1, density=300)
 
       #Generate a PDF which contains each of the requested images, in order.
       Prawn::Document.generate(filename, :skip_page_creation => true) do
@@ -218,32 +242,14 @@ module Assessment
         attempts.each do |attempt|
 
           #Convert the given attempt to a JPEG image.
-          attempt_image = attempt.to_jpeg
-
-          #And extract the image size, which we'll use to size our page.
-          size = attempt_image.columns, attempt_image.rows
-
-          #If we have a footer image...
-          unless footer.nil?
-            footer_image = Magick::Image.read(footer).first
-
-            #Adjust for its size by adding the footer height...
-            size[1] += footer_image.rows 
-
-            #And ensure that the page is wide enough for it
-            size[0] = [footer_image.columns, attempt_image.columns].max 
-
-          end
+          attempt_image = attempt.to_jpeg(footer, scale, density)
 
           #Start a new page which is exactly sized to the image.
-          start_new_page(:size => size, :margin => 0)
+          start_new_page(:size => [attempt_image.columns, attempt_image.rows], :margin => 0)
           
           #Add the image to our PDF...
           raw_image = StringIO.new(attempt_image.to_blob)
           image(raw_image)
-
-          #If we have a footer, add it.
-          image(footer) unless footer.nil?
 
         end
       end

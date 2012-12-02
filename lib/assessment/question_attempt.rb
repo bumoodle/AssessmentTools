@@ -119,12 +119,10 @@ module Assessment
     end
 
 
-
-
     #
     # Converts the given attempt to a single, JPEG image.
     #
-    def to_jpeg(footer=nil, density=300, quality=85)
+    def to_jpeg(footer=nil, scale=1, density=300, quality=85)
     
       #Create a new collection of ImageMagick images...
       image_list = Magick::ImageList.new
@@ -138,9 +136,19 @@ module Assessment
         #... rotate the given image, so it's upright...
         image.rotate!(image_info[:rotation])
 
+        #If a scale has been provided, use it.
+        unless scale == 0 || scale == 1
+          image.scale!(scale)
+        end
+
         #and add it to our image list.
         image_list << image
 
+      end
+
+      #If a footer was provided, add it to the image.
+      unless footer.nil?
+        image_list << Magick::Image.read(footer).first
       end
 
       #Merge all of the images in the list into a single, tall JPEG.
@@ -175,10 +183,13 @@ module Assessment
       #process each image in our array
       source_images.each do |image_file|
 
+        image = barcodes = nil
+
         #Read the image, and extract any releavnt barcodes using ZBar
-        p image_file
-        image = Magick::Image.read(image_file).first
-        barcodes = ZBar::Image.from_color_jpeg(image, threshold).process
+        quietly do 
+          image = Magick::Image.read(image_file).first
+          barcodes = ZBar::Image.from_color_jpeg(image, threshold).process
+        end
 
         #Assume a rotation of 0, unless otherwise specified
         rotation = nil
@@ -265,9 +276,8 @@ module Assessment
         270 
       end 
 
-
-
     end
+
 
     def self.rotation_from_top_center_location(width, height, locations)
 
@@ -288,6 +298,33 @@ module Assessment
         else 270 
       end
 
+    end
+
+
+    #
+    # Temporarily silences any writing to the standard output.
+    # This is used to force the poorly-behaved GhostScript to behave nicely.
+    #
+    def self.quietly
+
+      #Get a reference to the current handles to the standard output and error.
+      orig_stdout = STDOUT.clone
+      orig_stderr = STDERR.clone
+
+      #Get a reference to a null file (e.g. /dev/null).
+      null = File.open(File::NULL, 'w')
+
+      #Redirect the standard streams to it.
+      STDOUT.reopen(null)
+      STDERR.reopen(null)
+
+      #And call the relevant block of code.
+      yield
+
+    ensure
+      #Once we're done restore the standard streams.
+      STDOUT.reopen(orig_stdout)
+      STDERR.reopen(orig_stderr)
     end
 
 
