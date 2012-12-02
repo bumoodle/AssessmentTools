@@ -28,11 +28,10 @@ module ZBar
         image = image.threshold(Magick::QuantumRange * threshold)
 
         #and remove the ImageMagick wrapper
-        image.format = 'JPEG'
-        image = image.to_blob
+        image.format = 'JPEG' 
 
         #wrap the image in a ZBar parsing class
-        self.from_jpeg(image)
+        self.from_jpeg(image.to_blob)
     end
   end
 end
@@ -132,7 +131,7 @@ module Assessment
       
       @images.each do |image_info|
        
-        #Load each of the images into memory...
+       #Load each of the images into memory...
         image = Magick::Image.read(image_info[:path]) {self.density = density; self.quality = quality }
         image = image.first
 
@@ -177,6 +176,7 @@ module Assessment
       source_images.each do |image_file|
 
         #Read the image, and extract any releavnt barcodes using ZBar
+        p image_file
         image = Magick::Image.read(image_file).first
         barcodes = ZBar::Image.from_color_jpeg(image, threshold).process
 

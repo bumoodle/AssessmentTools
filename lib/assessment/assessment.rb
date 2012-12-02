@@ -2,12 +2,14 @@
 require 'RMagick'
 require 'pdf-reader'
 require 'prawn'
-require 'prawn/images/jpg'
 
 require_relative 'question_attempt'
 
 module Assessment
 
+  #
+  # Allow external access to the list of attempts.
+  #
   attr_reader :attempts
 
   #
@@ -28,7 +30,6 @@ module Assessment
       @by_question = {}
 
     end
-
 
     #
     # Factory method which procudes a new Assessment from a collection of files.
@@ -83,7 +84,7 @@ module Assessment
     end
 
     #
-    # Adds each page of a PDF file to the assessment.
+    # Adds each page of a small PDF file to the assessment.
     #
     def add_pdf(filename)
 
@@ -200,6 +201,13 @@ module Assessment
     end
 
     #
+    # Returns true iff the given image file is considered "large".
+    #
+    def self.image_is_large?(filename)
+      File::size(filename) > LARGE_FILE_CUTOFF
+    end
+
+    #
     # Creates a single PDF file from an ordered collection of attempts.
     #
     def self.pdf_from_attempt_collection(filename, attempts, footer=nil)
@@ -241,9 +249,5 @@ module Assessment
       end
 
     end
-
-      
-
   end
-
 end
