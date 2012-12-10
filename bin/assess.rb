@@ -63,7 +63,7 @@ def populate_assessment_info(attempt)
   identifier = identifier.match(identifier_format)
   
   #and use it to fill in the missing fields from the QA
-  attempt.usage_id, qa.question_id, qa.attempt_id = identifier[1], identifier[2], identifier[3]
+  attempt.copy_id, qa.question_id, qa.attempt_id = identifier[1], identifier[2], identifier[3]
 
 end
 
