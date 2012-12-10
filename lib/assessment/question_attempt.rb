@@ -60,7 +60,7 @@ module Assessment
     attr_accessor :rotation
 
     # Initializes a new Question Attempt object.
-    def initialize(copy_id, question_id, attempt_id, images, grade = 0, rotation = 0)
+    def initialize(copy_id, question_id, attempt_id, images, grade = nil, rotation = 0)
       @copy_id = copy_id
       @question_id = question_id
       @attempt_id = attempt_id
@@ -70,6 +70,7 @@ module Assessment
     end
 
     # Returns the proper Moodle-uploadable filename for then given Question Attempt.
+    # TODO: Perhaps move me, for decoupling?
     #
     # @param [Integer] page The page number to be appended to the filename.
     # @param [String] extension The extension to be appended to the filename, including the leading dot, or nil to use the same filetype as the original image.
@@ -86,6 +87,13 @@ module Assessment
 
       #return the new filename
       "#{directory}/U#{@copy_id}_Q#{@question_id}_A#{@attempt_id}_G#{@grade}_P#{page}#{extension}"
+    end
+
+    #
+    # Returns true iff the given image has a grade associated with it.
+    #
+    def graded?
+      not @grade.nil?
     end
 
 
@@ -111,18 +119,16 @@ module Assessment
     end
 
     #
-    # TODO: remove!
+    # Converts the given image into an array, suitable for use in a CSV.
     #
-    def rename_for_upload!(extension=nil)
-      #rename each of the images in the Question Attempt
-      @images.each_with_index { |image, i| File::rename(image[:path], filename_for_upload(i)) }
+    def to_a
+      [@copy_id, @question_id, @attempt_id, @grade]
     end
 
-
     #
-    # Converts the given attempt to a single, JPEG image.
+    # Converts the given attempt to a single image.
     #
-    def to_jpeg(footer=nil, scale=1, density=300, quality=85)
+    def to_image(scale=1, density=300, format='JPEG', footer=nil, quality= 85)
     
       #Create a new collection of ImageMagick images...
       image_list = Magick::ImageList.new
@@ -157,23 +163,30 @@ module Assessment
 
       #Merge all of the images in the list into a single, tall JPEG.
       image = image_list.append(true)
-      image.format = 'JPEG'
+      image.format = format
 
       #And return the image.
       image
 
     end
 
+    #
+    # Returns true iff the given question has a grade of nil.
+    #
+    def ungraded?
+      @grade.nil?
+    end
 
-    def self.from_image(image, threshold=0.65)
-        self.from_images([image])
+
+    def self.from_image(image, autorotate=true, threshold=0.65)
+        self.from_images([image], autorotate, threshold)
     end
 
     # Creates a new QuestionAttempt object from a set of images.
     #
     # @param [Array, string] A filename, or list of filenames, which contain images to be parsed as question attempts.
     #
-    def self.from_images(source_images, threshold=0.65)
+    def self.from_images(source_images, autorotate=true, threshold=0.65)
      
       #initialize the QA's identifiers to nil
       copy_id, question_id, attempt_id = nil, nil, nil
@@ -195,8 +208,8 @@ module Assessment
           barcodes = ZBar::Image.from_color_jpeg(image, threshold).process
         end
 
-        #Assume a rotation of 0, unless otherwise specified
-        rotation = nil
+        #Assume a rotation of nil, unless autorotate is off
+        rotation = autorotate ? nil : 0
 
         #process each of the extracted barcodes
         barcodes.each do |code|
@@ -212,7 +225,6 @@ module Assessment
 
             #use its _location_ to determine this image's rotation, if it's not already known
             rotation ||= rotation_from_top_right_location(image.columns, image.rows, code.location)
-
 
           end
 
@@ -242,8 +254,8 @@ module Assessment
           end
         end
 
-        #If we weren't able to figure out the rotation, fall back on false.
-        rotation ||= 0
+        #If we weren't able to figure out the rotation, fall back on some approximation of portrait.
+        rotation ||= (image.rows > image.columns) ? 0 : 90
 
         #Add the image to our collection of images.
         images << { :path => image_file, :rotation => rotation, :width => image.columns, :height => image.rows }
