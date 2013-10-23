@@ -39,7 +39,7 @@ module Assessment
     # If a block is provided, the block will be notified of progress, in the form of
     # |last_index_processed, total|.
     #
-    def self.from_files(files, autorotate=true)
+    def self.from_files(files, autorotate=true, threshold=0.65)
 
       #Create a new, empty assessment.
       assessment = self.new
@@ -49,11 +49,11 @@ module Assessment
 
         #Handle each file according to its extension
         case File.extname(file)
-          when '.pdf' 
-            assessment.add_pdf(file, autorotate)
-          else 
-            assessment.add_image(file, autorotate)
-          end
+        when '.pdf' 
+            assessment.add_pdf(file, autorotate, threshold)
+        else 
+            assessment.add_image(file, autorotate, threshold)
+        end
 
         #If we were given a block, notify it of our progress.
         yield index, files.count if block_given? 
@@ -88,14 +88,14 @@ module Assessment
     #
     # Adds a new single image file to the Assessment.
     #
-    def add_image(filename, autorotate=true)
-      add_attempt(QuestionAttempt.from_image(filename, autorotate))
+    def add_image(filename, autorotate=true, threshold=0.65)
+      add_attempt(QuestionAttempt.from_image(filename, autorotate, threshold))
     end
 
     #
     # Adds each page of a small PDF file to the assessment.
     #
-    def add_pdf(filename, autorotate=true)
+    def add_pdf(filename, autorotate=true, threshold=0.65)
 
       #Get a list of pages in the PDF file...
       pages = PDF::Reader.new(filename).pages
@@ -103,7 +103,7 @@ module Assessment
       #Add each _page_ as its own question.
       #We take advantage of the way ImageMagick views PDFs- in which each PDF is actually
       #an "array" of images, with filenames name.pdf[0], name.pdf[1], and etc.
-      pages.each_index { |i| add_image("#{filename}[#{i}]", autorotate) }
+      pages.each_index { |i| add_image("#{filename}[#{i}]", autorotate, threshold) }
 
     end
 

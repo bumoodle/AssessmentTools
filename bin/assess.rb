@@ -63,7 +63,7 @@ def populate_assessment_info(attempt)
   identifier = identifier.match(identifier_format)
   
   #and use it to fill in the missing fields from the QA
-  attempt.copy_id, qa.question_id, qa.attempt_id = identifier[1], identifier[2], identifier[3]
+  attempt.copy_id, attempt.question_id, attempt.attempt_id = identifier[1], identifier[2], identifier[3]
 
 end
 
@@ -104,6 +104,7 @@ opts = Trollop::options do
   opt :dpi,         "The DPI at which any PDF input should be captured.", :default => 300
   opt :scale,       "The size scale by which the input PDFs' dimensions are multiplied. 1 indicates same size; 0.25 indicates quarter size.", :default => 1.0
   opt :norotate,    "If specified, the provided images will not be rotated."
+  opt :threshold,   "The threshold which defines what the utility should consider \"black\" in a scan. Should be a floating-point number between 0 (everything) and 1 (nothing)", :default => 0.65
 
   opt :footer,      "An image to be appended to each question in the PDF.", :default => nil, :type=> :string
 
@@ -113,7 +114,7 @@ end
 split_pdfs!(ARGV, opts[:density]) if opts[:split]
 
 #If we don't have any other operation, abort.
-exit unless opts[:question] || opts[:attempt] || opts[:invalids] || opts[:moodle]
+exit unless opts[:question] || opts[:attempt] || opts[:invalids] || opts[:moodle] || opts[:csv]
 
 #
 # Analysis: Analyze each of the provided files, and extract grading information.
@@ -123,7 +124,7 @@ exit unless opts[:question] || opts[:attempt] || opts[:invalids] || opts[:moodle
 progress = ProgressBar.new('Analyzing', ARGV.count - 1,)
 
 #Create a new assessment, and fill it with each of the given files
-assess = Assessment::Assessment.from_files(ARGV, !opts[:norotate]) { |p| progress.set(p) }
+assess = Assessment::Assessment.from_files(ARGV, !opts[:norotate], opts[:threshold]) { |p| progress.set(p) }
 
 #Finish filling the progress bar.
 progress.finish
@@ -133,7 +134,9 @@ progress.finish
 #
 if opts[:interactive]
   assess.each_invalid_attempt { |a| populate_assessment_info(a) } 
-  assess.each_ungraded_attempt { |a| populate_grade_information(a) }
+
+  #If we have an option that uses grades, also attempt to populate grading information.
+  assess.each_ungraded_attempt { |a| populate_grade_information(a) } if opts[:moodle] || opts[:csv]
 end
 
 #
