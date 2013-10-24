@@ -192,7 +192,7 @@ module Assessment
       copy_id, question_id, attempt_id = nil, nil, nil
 
       #and create a list of possible grades
-      possible_grades = (1..10).to_a
+      possible_grades = (0..10).to_a
 
       #Create a new array, which will store information regarding each image.
       images = []

@@ -1,0 +1,40 @@
+#!/bin/bash
+
+RESIZE="800x"
+DENSITY=150
+QUALITY=100
+
+#create a new working directory
+work_dir=$(mktemp -d)
+
+#split the given PDF into individual pages
+pdftk "$1" burst output "$work_dir/page_%d.pdf"
+
+#keep page count
+count=1
+
+#for each of the given pages
+for i in "$work_dir/*.pdf"; do
+
+    echo -n "Processing page $i \r"
+
+    #get the PDF file's name
+    filename=$(basename "$1" .pdf)
+
+    #convert the PDF file to an image
+    convert -density $DENSITY -quality $QUALITY -resize $RESIZE "$i" "${filename}_$count.jpg"
+
+    #remove the original PDF
+    rm $i
+
+    #increment the page count
+    count=$(expr $count + 1)
+
+done
+
+#start a newline after the last carriage return
+echo ""
+
+#remove the work directory
+rmdir $work_dir
+

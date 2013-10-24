@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+
+require 'csv'
+require 'pp'
+
+  ID_Column = "Email address"
+
+def build_partner_database(partner_file_name)
+
+  partner_for = {}
+
+  #Process each row in the 
+  CSV::foreach(partner_file_name) do |row|
+
+    next if row.last == '-'
+    next if row.last.nil?
+
+    #Get the partner for the given name.
+    partner_for[row.first] ||= row.last    
+    partner_for[row.last]  ||= row.first
+
+  end
+
+  partner_for
+
+end
+
+#
+# Processes a CSV and outputs a synchronized version of the
+#
+def synchronize_grades(partner_database, input_grading_csv)
+
+  seen = {}
+
+  File::open(input_grading_csv) { |file| puts file.lines.first }
+
+  #Create a new CSV file from the existing file...
+  CSV::generate do |target_csv|
+    CSV::foreach(input_grading_csv, :headers => true) do |row|
+
+      #Skip duplicate rows.
+      next if seen[row.identifier]
+
+      #Add the row directly to the output...
+      target_csv << row
+
+      #... and mark it seen.
+      seen[row.identifier] = true
+     
+      #If a partner row should exist for this row, add it as well.
+      partner_row = row.generate_partner_row(partner_database)
+      target_csv << partner_row if partner_row
+
+    end
+  end
+end
+
+class CSV::Row
+  def generate_partner_row(partner_database)
+
+    #If the given student has a partner, copy the row for their partner.
+    return nil unless partner_database.include?(self.identifier)
+
+    #Create a new row with the partner's ID number intact.
+    new_row_for_partner = self.clone
+    new_row_for_partner[ID_Column] = partner_database[self.identifier]
+
+    new_row_for_partner
+
+  end
+
+  def identifier
+    self[ID_Column]
+  end
+
+end
+
+
+
+raise ArgumentError, "You must specify a list of partnerships and a file to sync." if ARGV.count != 2
+
+partner_database =  build_partner_database(ARGV.first)
+puts synchronize_grades(partner_database, ARGV.last)
+
+
+#vim: filetype=ruby
