@@ -1,0 +1,12 @@
+----------
+The following SQL join will get all IDCard-to-username mappings.
+This may need to be further be limited by course for larger servers.
+----------
+
+SELECT data.data, user.username
+  FROM 
+    mdl_user as user, mdl_user_info_field as field, mdl_user_info_data as data
+  WHERE 
+    user.id = data.userID   AND
+    data.fieldid = field.id AND
+    field.shortname = 'idcard';

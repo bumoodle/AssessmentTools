@@ -17,10 +17,11 @@ module ZBar
     # @return [Image] The ZBar Image object that wraps the given image.
     #
     def self.from_color_jpeg(image, threshold=0.65)
-   
-        #convert the image into an ImageMagick object
-        #image = Magick::Image::from_blob(image).first
-        unless image.is_a? Magick::Image
+  
+        magick_image_provided = image.is_a? Magick::Image
+
+        #If necessary, convert the image into an ImageMagick object.
+        unless magick_image_provided
           image = Magick::Image.read(image).first
         end
 
@@ -32,6 +33,13 @@ module ZBar
 
         #wrap the image in a ZBar parsing class
         self.from_jpeg(image.to_blob)
+
+    ensure
+       
+        #If we created an ImageMagick image during this routine,
+        #ensure that it's properly destroyed.
+        image.destroy! unless magick_image_provided
+
     end
   end
 end
@@ -42,7 +50,7 @@ module Assessment
   class QuestionAttempt
 
     #Regular expression used to parse Question Identifier codes
-    QUESTION_ID = /([0-9]+)\|([0-9]+)\|([0-9]+)/
+    QUESTION_ID = /(?<copy_id>[0-9]+)\|(?<question_id>[0-9]+)\|(?<attempt_id>[0-9]+)/
 
     #Regular expression usd to parse Grade Disqualifier codes
     GRADE_DISQUALIFIER = /GRADE([0-9]+)/
@@ -129,7 +137,7 @@ module Assessment
     # Converts the given attempt to a single image.
     #
     def to_image(scale=1, density=300, format='JPEG', footer=nil, quality= 85)
-    
+
       #Create a new collection of ImageMagick images...
       image_list = Magick::ImageList.new
       
@@ -139,7 +147,7 @@ module Assessment
 
         #Load each of the images into memory...
         self.class.quietly do
-          image = Magick::Image.read(image_info[:path]) {self.density = density; self.quality = quality }
+          image = Magick::Image.read(image_info[:path]) {self.density = density if density; self.quality = quality if quality }
           image = image.first
         end
 
@@ -157,16 +165,18 @@ module Assessment
       end
 
       #If a footer was provided, add it to the image.
-      unless footer.nil?
-        image_list << Magick::Image.read(footer).first
-      end
+      image_list << Magick::Image.read(footer).first unless footer.nil?
 
       #Merge all of the images in the list into a single, tall JPEG.
       image = image_list.append(true)
-      image.format = format
+      image.format = format unless image.format.nil?
+
+      #Destroy the original ImageList, freeing memory.
+      image_list.destroy!
 
       #And return the image.
       image
+
 
     end
 
@@ -178,97 +188,154 @@ module Assessment
     end
 
 
+    #
+    # Creats a new QuestionAttempt object from a singl eimage.
+    #
+    #
     def self.from_image(image, autorotate=true, threshold=0.65)
         self.from_images([image], autorotate, threshold)
     end
+
 
     # Creates a new QuestionAttempt object from a set of images.
     #
     # @param [Array, string] A filename, or list of filenames, which contain images to be parsed as question attempts.
     #
-    def self.from_images(source_images, autorotate=true, threshold=0.65)
+    def self.from_images(source_images, autorotate=true, threshold=0.65, maximum_grade=10)
      
       #initialize the QA's identifiers to nil
-      copy_id, question_id, attempt_id = nil, nil, nil
+      identifiers = {}
 
       #and create a list of possible grades
-      possible_grades = (0..10).to_a
+      possible_grades = (0..maximum_grade).to_a
 
-      #Create a new array, which will store information regarding each image.
+      #Process each image in the file.
       images = []
-
-      #process each image in our array
       source_images.each do |image_file|
+          image = barcodes  = nil
 
-        image = barcodes = nil
+          #Read the image, and extract any releavnt barcodes using ZBar
+          quietly do 
+            image    = Magick::Image.read(image_file).first
+            barcodes = ZBar::Image.from_color_jpeg(image, threshold).process
+          end
 
-        #Read the image, and extract any releavnt barcodes using ZBar
-        quietly do 
-          image = Magick::Image.read(image_file).first
-          barcodes = ZBar::Image.from_color_jpeg(image, threshold).process
-        end
+          #TODO: Handle multiple-barcode images. 
 
-        #Assume a rotation of nil, unless autorotate is off
-        rotation = autorotate ? nil : 0
+          #process each of the extracted barcodes
+          barcodes.each do |code|
 
-        #process each of the extracted barcodes
-        barcodes.each do |code|
+            #If this is a question identifier, use the given barcode to identify the given attempt.
+            identifiers.update(extract_identifiers_from_QR_match(code, image))
 
-          #attempt to match the barcode against our Question ID pattern
-          identifier = code.data.match(QUESTION_ID)
-          
-          #if it matches the identifier pattern
-          if identifier
+            #If this is a grade disqulaifier, remove the grade from the list of possible grades.
+            possible_grades.delete(extract_grade_disqualifier(code))
 
-            #use it to determine the QA's identifiers
-            copy_id, question_id, attempt_id = identifier[1], identifier[2], identifier[3]
-
-            #use its _location_ to determine this image's rotation, if it's not already known
-            rotation ||= rotation_from_top_right_location(image.columns, image.rows, code.location)
+            #If this is a top 
+            identifiers.update(extract_identifiers_from_top_barcode(code, image))
 
           end
 
-          #attempt ot match the barcode against our grade disqualifier pattern
-          grader = code.data.match(GRADE_DISQUALIFIER)
+          #If we weren't able to figure out the rotation, fall back on some approximation of portrait.
+          identifiers[:rotation] ||= (image.rows > image.columns) ? 0 : 90
 
-          #if the data matches the disqualifier pattern
-          if grader
-   
-            #get the value of the grade that was disqualified
-            grade = Integer(grader[1])
+          #If autorotate is off, ignore the computed rotation.
+          identifiers[:rotation] = 0 unless autorotate
 
-            #and remove the disqualified grade from the array of possible grades
-            possible_grades.delete(grade)
+          #Add the image to our collection of images.
+          images << { :path => File.absolute_path(image_file), :rotation => identifiers[:rotation], :width => image.columns, :height => image.rows }
 
-          end
-
-          #If we have a top-of-the-page identification barcode, use it to get the orientation
-          if code.symbology == 'CODE-128'
-
-            #its _location_ to determine this image's rotation
-            rotation ||= rotation_from_top_center_location(image.columns, image.rows, code.location)
-
-            #and, if we don't already have a usage id, use it
-            copy_id ||= code.data
-
-          end
-        end
-
-        #If we weren't able to figure out the rotation, fall back on some approximation of portrait.
-        rotation ||= (image.rows > image.columns) ? 0 : 90
-
-        #Add the image to our collection of images.
-        images << { :path => image_file, :rotation => rotation, :width => image.columns, :height => image.rows }
-
+          #Clean up after RMagick.
+          image.destroy! if image
       end
 
-      #if we were able to find a grade, then use it; otherwise, set a grade of nil
+      #if we were able to find a grade, then use it; otherwise, set a grade of nil.
       grade = (possible_grades.count == 1) ? possible_grades[0] : nil
 
       #Create a new QuestionAttempt object from the parsed data 
-      return self.new(copy_id, question_id, attempt_id, images, grade) 
+      return self.new(identifiers[:copy_id], identifiers[:question_id], identifiers[:attempt_id], images, grade) 
 
     end
+
+    #
+    # Extracts any identifying information from a QR code match, if possible. 
+    # This method can be called with any ZBar match; if the match isn't a question
+    # identifier, it will return nil.
+    #
+    # @param code The ZBar barcode scan to be processed.
+    # @param image [Magick::Image] An optional ImageMagick image, which will be used to determine
+    #     how the given image should be rotated.
+    #
+    # @return A hash including any data fields extracted from the QR code.
+    #
+    def self.extract_identifiers_from_QR_match(code, image=nil)
+
+      #Attempt to match the barcode against our Question ID pattern.
+      identifiers = code.data.match(QUESTION_ID)
+
+      #If we weren't able to match the data, return an empty hash.
+      return {} if identifiers.nil?
+      
+      #Extract each of the identifiers from the barcode.
+      capture_names = identifiers.names.map { |name| name.to_sym }
+      identifiers = Hash[capture_names.zip(identifiers.captures)]
+
+      #Attempt to determine how the image should be rotated, based on the QR code's location.
+      if image
+        identifiers[:rotation] = rotation_from_top_right_location(image.columns, image.rows, code.location) 
+      end
+    
+      identifiers
+
+    end
+
+
+    #
+    # Attempts to extract a "grade disqualifier" from the given barcode,
+    # which represents an unfilled grading bubble.
+    #
+    # @param code The ZBar barcode scan to be processed.
+    #
+    # @return The integer grade to be disqualified, or nil if this was not a valid grade disqualifier.
+    #
+    def self.extract_grade_disqualifier(code) 
+
+      #Determine if the barcode matches our grade disqualifier pattern.
+      grader = code.data.match(GRADE_DISQUALIFIER)
+
+      #If it didn't; return nil-- otherwise, return the grade.
+      grader.nil?() ? nil : grader[1].to_i
+
+    end
+
+
+    # Extracts any identifying information from a top barcode (CODE-128) match.
+    # This method can be called with any ZBar match; if the match isn't a question
+    # identifier, it will return nil.
+    #
+    # @param code The ZBar barcode scan to be processed.
+    # @param image [Magick::Image] An optional ImageMagick image, which will be used to determine
+    #     how the given image should be rotated.
+    #
+    # @return A hash including any data fields extracted from the QR code.
+    #
+    def self.extract_identifiers_from_top_barcode(code, image=nil)
+
+      return {} unless code.symbology == 'CODE-128'
+
+      #Extract the copy ID from the top barcode.
+      identifiers  = { :copy_id => code.data }
+
+      #If an image was provided, use it to extract the amount by which
+      #the page will need to be rotated.
+      if image
+        identifiers[:rotation] = rotation_from_top_center_location(image.columns, image.rows, code.location)
+      end
+      
+      identifiers
+
+    end
+
 
     def self.rotation_from_top_right_location(width, height, locations)
 

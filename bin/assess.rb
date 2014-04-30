@@ -1,4 +1,5 @@
 
+require 'yaml'
 require 'trollop'
 require 'docsplit'
 require 'assessment'
@@ -48,9 +49,30 @@ def split_pdfs!(list, density=300, format=:jpg)
 end
 
 #
+# Display the given image, with the provided viewer.
+#
+def display_if_requested(image, viewer)
+
+  return unless viewer
+
+  #Create a viewer pathname.
+  if viewer.include?('%')
+    command = viewer.sub('%', "\"#{image}\"") 
+  else
+    command = "#{viewer} \"#{image}\""
+  end
+
+  #Execute the viewer.
+  puts `#{command}`
+
+end
+
+#
 # Iteractively requests assessment info for the given assignment.
 #
-def populate_assessment_info(attempt)
+def populate_assessment_info(attempt, viewer=nil)
+
+  display_if_requested(attempt.images.first[:path], viewer)
 
   #establish the format in which the user should enter the identifier 
   #TODO: abstract?
@@ -70,7 +92,9 @@ end
 #
 # Interactively requests a grade for the given assesssment.
 #
-def populate_grade_information(attempt)
+def populate_grade_information(attempt, viewer=nil)
+
+  display_if_requested(attempt.images.first[:path], viewer)
 
   #TODO: abstract
   grade_range = 0..10
@@ -88,10 +112,13 @@ opts = Trollop::options do
   opt :split,       "Split multi-page PDFs into multiple single-page PDFs."
   opt :outpath,     "Specifies the output folder for multiple-file operations.", :default => Dir::pwd
   opt :interactive, "If set, the system will interactively prompt for fixes when invalid data appears."
+  opt :display,     "If provided, the system will call the command whenever inquiring about an image. Used to display the image prior to the prompt. Image is provided an an argument.", :type => :string, :default => nil
 
   opt :moodle,      "Interactively generates a single JPEG for each attempt in a Moodle-uploadable format."
 
   opt :csv,         "Generate a single CSV file with all of the extracted assessment data, and writes it to the given filename.", :type => :string
+
+  opt :save,        "Save the results of the performed analysis to a YAML file. This file can later be used as input, preventing a redundant analysis.", :type => :string
 
   opt :question,    "Split into several single-question PDFs."
   opt :qprefix,     "The prefix use for single-question PDF files. Ignored unless the --question flag is provided.", :default => 'question'
@@ -104,7 +131,7 @@ opts = Trollop::options do
   opt :dpi,         "The DPI at which any PDF input should be captured.", :default => 300
   opt :scale,       "The size scale by which the input PDFs' dimensions are multiplied. 1 indicates same size; 0.25 indicates quarter size.", :default => 1.0
   opt :norotate,    "If specified, the provided images will not be rotated."
-  opt :threshold,   "The threshold which defines what the utility should consider \"black\" in a scan. Should be a floating-point number between 0 (everything) and 1 (nothing)", :default => 0.65
+  opt :threshold,   "The threshold which defines what the utility should consider \"black\" in a scan. Should be a floating-point number between 0 (everything) and 1 (nothing)", :default => 0.82
 
   opt :footer,      "An image to be appended to each question in the PDF.", :default => nil, :type=> :string
 
@@ -114,7 +141,7 @@ end
 split_pdfs!(ARGV, opts[:density]) if opts[:split]
 
 #If we don't have any other operation, abort.
-exit unless opts[:question] || opts[:attempt] || opts[:invalids] || opts[:moodle] || opts[:csv]
+exit unless opts[:question] || opts[:attempt] || opts[:invalids] || opts[:moodle] || opts[:csv] || opts[:save]
 
 #
 # Analysis: Analyze each of the provided files, and extract grading information.
@@ -129,15 +156,19 @@ assess = Assessment::Assessment.from_files(ARGV, !opts[:norotate], opts[:thresho
 #Finish filling the progress bar.
 progress.finish
 
+
 #
 # If interactive mode is set, allow the user to repair any invalid data.
 #
 if opts[:interactive]
-  assess.each_invalid_attempt { |a| populate_assessment_info(a) } 
+  assess.each_invalid_attempt { |a| populate_assessment_info(a, opts[:display]) } 
 
   #If we have an option that uses grades, also attempt to populate grading information.
-  assess.each_ungraded_attempt { |a| populate_grade_information(a) } if opts[:moodle] || opts[:csv]
+  assess.each_ungraded_attempt { |a| populate_grade_information(a, opts[:display]) } if opts[:moodle] || opts[:csv]
 end
+
+#If the "save" option is set, save the analysis results to the given YAML file.
+File.write(opts[:save], assess.to_yaml) if opts[:save]
 
 #
 # Handle generation of the files.
@@ -155,12 +186,14 @@ options = {
   :density => opts[:dpi]
 }
 
+count = assess.attempts.count
+
 #Compute the total number of attempts-images to be generated,
 #which should roughly correspond to the needed computation time.
-to_be_generated = (opts[:question] ? assess.question_count : 0)
-to_be_generated += (opts[:attempt] ? assess.copy_count : 0)
+to_be_generated = (opts[:question] ? count : 0)
+to_be_generated += (opts[:attempt] ? count : 0)
 to_be_generated += (opts[:invalids] ? assess.invalid_attempts.count : 0)
-to_be_generated += (opts[:moodle] ? assess.attempts.count : 0)
+to_be_generated += (opts[:moodle] ? count : 0)
 
 
 #Create a progress bar, which will track the status of the generation.

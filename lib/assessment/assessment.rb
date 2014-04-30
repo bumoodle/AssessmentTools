@@ -27,7 +27,8 @@ module Assessment
       #If attempts were provided, use them; otherwise, use an empty array.
       @attempts = attempts || []
 
-      #Create a hashes which sort the attempts by various IDs
+      #Create a hashes which sort the attempts by various IDs.
+      #TODO: Rename to be more idiomatic; e.g. attempts_by_copy.
       @by_copy = {}
       @by_question = {}
 
@@ -51,6 +52,8 @@ module Assessment
         case File.extname(file)
         when '.pdf' 
             assessment.add_pdf(file, autorotate, threshold)
+        when '.yaml'
+            assessment.add_yaml(file)
         else 
             assessment.add_image(file, autorotate, threshold)
         end
@@ -77,10 +80,37 @@ module Assessment
         @by_copy[attempt.copy_id] << attempt
       end
 
-      #... and to our by-question hash
+      #... and to our by-question hash.
+      #TODO: Remove duplication.
       unless attempt.question_id.nil?
         @by_question[attempt.question_id] ||= []
         @by_question[attempt.question_id] << attempt
+      end
+
+    end
+
+    #
+    # Merges an existing assessment object into
+    # this assessment; copying over all existing attempts
+    # and their associations.
+    #
+    def add_assessment(assessment)
+
+      #TODO: Sanity check all attempts?
+
+      #Merge the new assessment's attempts into the list of attempts.
+      @attempts.push(*assessment.attempts)
+
+      #And merge its associations.
+      assessment.by_copy.each do |id, attempts|
+        @by_copy[id] ||= []
+        @by_copy[id].push(*attempts)
+      end
+
+      #TODO: Remove duplication.
+      assessment.by_question.each do |id, attempts|
+        @by_question[id] ||= []
+        @by_question[id].push(*attempts)
       end
 
     end
@@ -90,6 +120,14 @@ module Assessment
     #
     def add_image(filename, autorotate=true, threshold=0.65)
       add_attempt(QuestionAttempt.from_image(filename, autorotate, threshold))
+    end
+
+    #
+    # Adds a YAML file to the current assessment.
+    #
+    def add_yaml(filename)
+      assessment = YAML.load(File.open(filename))
+      add_assessment(assessment)
     end
 
     #
@@ -246,6 +284,9 @@ module Assessment
         #Write the attempt to the given file, and continue.
         image.write(filename)
 
+        #Clean up the RMagick information for the given image.
+        image.destroy!
+
       end
     end
 
@@ -344,6 +385,8 @@ module Assessment
       density     = options[:density]  || 300
       footer      = options[:footer]
 
+      total_iterations = 0
+
       #Iterate over the copies of this assessment
       iterator.each_with_index do |values, index|
 
@@ -354,17 +397,12 @@ module Assessment
         filename = path +  "#{prefix}_#{id}.pdf"
 
         #Create a PDF from the given collection of attempts.
-        pdf_from_attempt_collection(filename, attempts, footer, scale, density)
-
-        #If a status-requesting block was given, yield the current status to it.
-        if block_given?
-            yield index, iterator.count
+        pdf_from_attempt_collection(filename, attempts, footer, scale, density) do |inner_index, count|
+            yield total_iterations += 1, iterator.count * count if block_given?
         end
 
       end    
     end
-
-
 
     #
     # Creates a single PDF file from an ordered collection of attempts.
@@ -386,6 +424,10 @@ module Assessment
           raw_image = StringIO.new(attempt_image.to_blob)
           image(raw_image)
 
+          #Attempt to clean up after RMagick...
+          raw_image.close
+          attempt_image.destroy!
+
           #If a block was provided, pass it the current status.
           if block_given?
             yield index, attempts.count
@@ -395,5 +437,11 @@ module Assessment
       end
 
     end
+
+    protected
+      
+      attr_reader :by_copy
+      attr_reader :by_question
+
   end
 end
